@@ -1,11 +1,35 @@
 import { useState } from "react";
 import { api } from "../api.js";
 
-const PLACEHOLDER = `Paste a JSON array of log entries, e.g.
-[
-  { "timestamp": "2026-08-20T09:14:02Z", "source": "192.168.1.14", "event_type": "GET /api/users", "status_code": 200 },
-  { "timestamp": "2026-08-20T09:15:10Z", "source": "10.0.0.55", "event_type": "POST /api/payment", "status_code": 500 }
-]`;
+const PLACEHOLDER = `Paste a JSON array or CSV log entries, e.g.
+Timestamp,Source,Event,Severity,StatusCode,Message
+2026-08-20T09:14:02Z,192.168.1.14,GET /api/users,info,200,OK
+2026-08-20T09:15:10Z,10.0.0.55,POST /api/payment,error,500,Failed`;
+
+function parseCSV(text) {
+  const lines = text.trim().split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length < 2) return [];
+
+  const headers = lines[0].split(",").map((h) => h.trim().toLowerCase().replace(/['"]/g, ""));
+  
+  return lines.slice(1).map((line) => {
+    // Regex matches commas outside of quotes
+    const values = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map((v) => v.trim().replace(/^"|"$/g, ""));
+    const row = {};
+    headers.forEach((h, i) => {
+      row[h] = values[i] ?? "";
+    });
+
+    return {
+      timestamp: row.timestamp || row.time || row.date || new Date().toISOString(),
+      source: row.source || row.ip || row.service || "unknown",
+      event_type: row.event_type || row.event || row.action || "log",
+      severity: (row.severity || row.level || "info").toLowerCase(),
+      status_code: row.status_code || row.statuscode || row.status ? Number(row.status_code || row.statuscode || row.status) : null,
+      message: row.message || row.msg || row.description || "",
+    };
+  });
+}
 
 export default function UploadForm({ onIngested }) {
   const [text, setText] = useState("");
@@ -24,14 +48,26 @@ export default function UploadForm({ onIngested }) {
     setError(null);
     setResult(null);
     try {
-      let payload;
+      let rawText = "";
+      let isCsv = false;
+
       if (file) {
-        const content = await file.text();
-        payload = JSON.parse(content);
+        rawText = await file.text();
+        isCsv = file.name.endsWith(".csv") || file.type === "text/csv";
       } else {
-        if (!text.trim()) throw new Error("Paste some JSON log entries first, or choose a file.");
-        payload = JSON.parse(text);
+        if (!text.trim()) throw new Error("Paste log entries or choose a file.");
+        rawText = text.trim();
+        isCsv = rawText.startsWith("Timestamp,") || !rawText.startsWith("[");
       }
+
+      let payload;
+      if (isCsv) {
+        payload = parseCSV(rawText);
+        if (!payload.length) throw new Error("Could not parse valid CSV log rows.");
+      } else {
+        payload = JSON.parse(rawText);
+      }
+
       const res = await api.ingestLogs(payload);
       setResult(res);
       setText("");
@@ -46,7 +82,7 @@ export default function UploadForm({ onIngested }) {
 
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 mb-6">
-      <h3 className="text-sm font-semibold text-slate-200 mb-2">Ingest logs</h3>
+      <h3 className="text-sm font-semibold text-slate-200 mb-2">Ingest logs (JSON / CSV)</h3>
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
@@ -58,7 +94,7 @@ export default function UploadForm({ onIngested }) {
       <div className="flex flex-wrap items-center gap-3 mt-3">
         <input
           type="file"
-          accept="application/json"
+          accept=".csv, .json, application/json, text/csv"
           onChange={handleFile}
           className="text-xs text-slate-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-slate-800 file:text-slate-300 file:text-xs hover:file:bg-slate-700"
         />

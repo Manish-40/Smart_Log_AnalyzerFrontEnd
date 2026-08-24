@@ -8,7 +8,7 @@ export default defineConfig({
     proxy: {
       // During local dev, requests to /api go to the local Express server.
       "/api": {
-        target: "https://smart-log-analyzer-backend-87xk.vercel.app",
+        target: "http://localhost:8080",
         changeOrigin: true,
       },
     },
